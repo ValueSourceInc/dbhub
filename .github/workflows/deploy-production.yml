@@ -1,0 +1,94 @@
+name: Deploy to Production (centos2-vs-com)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: centos2-vs-com
+
+    env:
+      PATH: /bin:/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/sbin:/home/${{ secrets.SERVER_USERNAME }}/.nvm/versions/node/v22.14.0/bin:/home/${{ secrets.SERVER_USERNAME }}/.local/share/pnpm:$PATH
+
+    steps:
+      - name: 创建项目目录
+        run: |
+          echo "===== 创建项目目录 ====="
+          mkdir -p /nodejs/mcp/dbhub/
+
+      - name: 进入项目目录
+        run: |
+          echo "===== 进入项目目录 ====="
+          cd /nodejs/mcp/dbhub/
+          echo "当前目录: $(pwd)"
+
+      - name: 拉取最新代码
+        run: |
+          echo "===== 拉取最新代码 ====="
+          cd /nodejs/mcp/dbhub/
+          git pull
+          echo "Git 分支信息:"
+          git branch -v
+
+      - name: 安装依赖
+        run: |
+          echo "===== 安装依赖 ====="
+          cd /nodejs/mcp/dbhub/
+          pnpm i
+          echo "Node 版本: $(node -v)"
+          echo "PNPM 版本: $(pnpm -v)"
+
+      - name: 编译项目
+        run: |
+          echo "===== 编译项目 ====="
+          cd /nodejs/mcp/dbhub/
+          pnpm build
+          echo "Node 版本: $(node -v)"
+          echo "PNPM 版本: $(pnpm -v)"
+          
+      - name: 重启应用
+        run: |
+          echo "===== 重启应用 ====="
+          cd /nodejs/mcp/dbhub/
+          if pm2 list | grep -q dbhub; then
+            pm2 restart dbhub
+          else
+            pm2 start pm2.config.json
+          fi
+          echo "PM2 状态:"
+          pm2 status dbhub
+
+      - name: 监控应用日志
+        run: |
+          echo "===== 应用日志 (10秒) ====="
+          cd /nodejs/mcp/dbhub/
+          # 清除旧日志以便查看最新日志
+          # pm2 flush dbhub
+          # 等待应用启动并生成日志
+          sleep 3
+          # 获取最新日志
+          pm2 logs dbhub --lines 100 --raw &
+          LOG_PID=$!
+          # 等待10秒
+          sleep 10
+          # 终止日志进程
+          kill $LOG_PID 2>/dev/null || true
+
+      - name: 检查应用状态
+        run: |
+          echo "===== 检查应用状态 ====="
+          cd /nodejs/mcp/dbhub/
+          # 检查应用是否在运行
+          if pm2 show dbhub | grep -q "online"; then
+            echo "✅ 应用已成功启动并运行中"
+            echo "内存使用: $(pm2 show dbhub | grep memory | awk '{print $4}')"
+            echo "CPU使用: $(pm2 show dbhub | grep cpu | awk '{print $2}')"
+            echo "运行时间: $(pm2 show dbhub | grep uptime | awk '{print $2, $3, $4}')"
+          else
+            echo "❌ 应用启动失败"
+            pm2 show dbhub
+            exit 1
+          fi
+          echo "===== 部署完成 ====="
